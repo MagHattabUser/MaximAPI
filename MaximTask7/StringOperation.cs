@@ -1,6 +1,6 @@
 namespace MaximTask7
 {
-    public class WeatherForecast
+    public class StringOperation
     {
         public DateOnly Date { get; set; }
 
