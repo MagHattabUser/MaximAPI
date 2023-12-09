@@ -9,10 +9,20 @@ namespace MaximTask7.Controllers
     [Route("[controller]")]
     public class StringOperationController : ControllerBase
     {
+        private readonly IConfiguration _configuration;
+
+        public StringOperationController(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
         [HttpGet]
         public ActionResult<string> ProcessStringAction(string inputString, SortingOption sortingOption)
         {
             var regex = new Regex("^[a-z]+$");
+            if (CheckBlackList(inputString))
+            {
+                return BadRequest("Строка в черном списке - " + inputString);
+            }
             if (!regex.IsMatch(inputString))
             {
                 string errorMessage = "";
@@ -71,6 +81,11 @@ namespace MaximTask7.Controllers
                 return Ok(responseObject);
             }
         }
+        private bool CheckBlackList(string inputString)
+        {
+            var blacklist = _configuration.GetSection("Settings").GetSection("Blacklist").Get<List<string>>();
+            return blacklist != null && blacklist.Contains(inputString.ToLower());
+        }
         public enum SortingOption
         {
             Option1 = 1,
@@ -104,13 +119,14 @@ namespace MaximTask7.Controllers
             return largestSubstring;
         }
 
-        static async Task<string> GetRandomNumber(int inputStringLenght)
+        async Task<string> GetRandomNumber(int inputStringLenght)
         {
+            var url = _configuration.GetSection("RandomAPI").Get<List<string>>();
             try
             {
                 using (HttpClient client = new HttpClient())
                 {
-                    string apiUrl = "https://www.random.org/integers/?num=1&min=0&max=" + inputStringLenght.ToString() + "&col=1&base=10&format=plain&rnd=new";
+                    string apiUrl = url[0] + inputStringLenght.ToString() + url[2];
                     HttpResponseMessage response = await client.GetAsync(apiUrl);
 
                     if (response.IsSuccessStatusCode)
