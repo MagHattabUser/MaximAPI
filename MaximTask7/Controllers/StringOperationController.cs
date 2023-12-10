@@ -1,7 +1,12 @@
 using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Collections.Concurrent;
 using System.Data.SqlTypes;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace MaximTask7.Controllers
 {
@@ -10,75 +15,88 @@ namespace MaximTask7.Controllers
     public class StringOperationController : ControllerBase
     {
         private readonly IConfiguration _configuration;
-
+        private readonly SemaphoreSlim semaphore;
         public StringOperationController(IConfiguration configuration)
         {
             _configuration = configuration;
+            int usersCount = _configuration.GetSection("Settings").GetSection("ParallelLimit").Get<int>();
+            semaphore = new SemaphoreSlim(usersCount, usersCount);
         }
         [HttpGet]
-        public ActionResult<string> ProcessStringAction(string inputString, SortingOption sortingOption)
+        public async Task<ActionResult<string>> ProcessStringAction(string inputString, SortingOption sortingOption)
         {
-            var regex = new Regex("^[a-z]+$");
-            if (CheckBlackList(inputString))
+            await semaphore.WaitAsync();
+            try
             {
-                return BadRequest("Строка в черном списке - " + inputString);
-            }
-            if (!regex.IsMatch(inputString))
-            {
-                string errorMessage = "";
-                foreach (var item in inputString)
+                var regex = new Regex("^[a-z]+$");
+                if (CheckBlackList(inputString))
                 {
-                    if (!regex.IsMatch(item.ToString()))
-                    {
-                        errorMessage += item;
-                    }
+                    return BadRequest("Строка в черном списке - " + inputString);
                 }
-                return BadRequest("Некоректные символы - " + errorMessage);
-
-            }
-            else
-            {
-                int length = inputString.Length;
-                if (length % 2 == 0)
+                if (!regex.IsMatch(inputString))
                 {
-                    string firstHalf = inputString.Substring(0, length / 2);
-                    string secondHalf = inputString.Substring(length / 2);
-                    firstHalf = Reverse(firstHalf);
-                    secondHalf = Reverse(secondHalf);
+                    string errorMessage = "";
+                    foreach (var item in inputString)
+                    {
+                        if (!regex.IsMatch(item.ToString()))
+                        {
+                            errorMessage += item;
+                        }
+                    }
+                    return BadRequest("Некоректные символы - " + errorMessage);
 
-                    inputString = firstHalf + secondHalf;
                 }
                 else
                 {
-                    inputString = Reverse(inputString) + inputString;
-                }
+                    int length = inputString.Length;
+                    if (length % 2 == 0)
+                    {
+                        string firstHalf = inputString.Substring(0, length / 2);
+                        string secondHalf = inputString.Substring(length / 2);
+                        firstHalf = Reverse(firstHalf);
+                        secondHalf = Reverse(secondHalf);
 
-                var lettersCount = new List<string>();
-                foreach (var item in inputString.Distinct().ToArray())
-                {
-                    var count = inputString.Count(symbol => symbol == item);
-                    lettersCount.Add("Кол-во символов " + item.ToString() + " - " + count.ToString());
-                }
+                        inputString = firstHalf + secondHalf;
+                    }
+                    else
+                    {
+                        inputString = Reverse(inputString) + inputString;
+                    }
 
-                char[] chars = inputString.ToCharArray();
-                if (sortingOption.ToString() == "1")
-                {
-                    SortClass.QuickSort(chars, 0, chars.Length - 1);
-                }
-                else if(sortingOption.ToString() == "2")
-                {
-                    SortClass.TreeSort(chars);
-                }
-                var responseObject = new
-                {
-                    ProcessedString = inputString,
-                    LettersCount = lettersCount,
-                    LongestSubstring = FindLargestSubstring(inputString),
-                    SortString = new string(chars),
-                    RemoveString = (DeleteSymbol(inputString, int.Parse(GetRandomNumber(inputString.Length - 1).Result)))
-                };
+                    var lettersCount = new List<string>();
+                    foreach (var item in inputString.Distinct().ToArray())
+                    {
+                        var count = inputString.Count(symbol => symbol == item);
+                        lettersCount.Add("Кол-во символов " + item.ToString() + " - " + count.ToString());
+                    }
 
-                return Ok(responseObject);
+                    char[] chars = inputString.ToCharArray();
+                    if (sortingOption.ToString() == "1")
+                    {
+                        SortClass.QuickSort(chars, 0, chars.Length - 1);
+                    }
+                    else if (sortingOption.ToString() == "2")
+                    {
+                        SortClass.TreeSort(chars);
+                    }
+                    var responseObject = new
+                    {
+                        ProcessedString = inputString,
+                        LettersCount = lettersCount,
+                        LongestSubstring = FindLargestSubstring(inputString),
+                        SortString = new string(chars),
+                        RemoveString = (DeleteSymbol(inputString, int.Parse(GetRandomNumber(inputString.Length - 1).Result)))
+                    };
+                    return Ok(responseObject);
+                }    
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(503, new { ErrorMessage = "Service Unavailable" });
+            }
+            finally
+            {
+                semaphore.Release();
             }
         }
         private bool CheckBlackList(string inputString)
